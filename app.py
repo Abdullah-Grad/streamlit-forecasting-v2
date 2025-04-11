@@ -1,4 +1,4 @@
-
+import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,13 +7,18 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
-from google.colab import files
+#from google.colab import files
 
 # --- 1. Upload and Prepare the Demand Data ---
 print('Please upload your demand data file (Excel format).')
-uploaded = files.upload()
-file_name = list(uploaded.keys())[0]
-df = pd.read_excel(file_name)
+import streamlit as st
+
+st.title("Demand Forecasting and Workforce Scheduling")
+uploaded_file = st.file_uploader("Upload your demand Excel file", type=["xlsx"])
+
+if uploaded_file is not None:
+    df = pd.read_excel(uploaded_file)
+    # continue with reshaping and forecasting...
 
 # Reshape to long format
 month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
