@@ -156,8 +156,7 @@ combined_fitted = w1 * sarima_fitted.values + w2 * prophet_fitted + w3 * hw_fitt
 combined_fitted_series = pd.Series(combined_fitted, index=df_long.index[:len(combined_fitted)])
 
 # --- 10. Evaluation ---
-print(f"
-Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | In-Sample MAE: {mean_absolute_error(df_long['Demand'], combined_fitted_series):.2f}")
+print(f"Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | In-Sample MAE: {mean_absolute_error(df_long['Demand'], combined_fitted_series):.2f}")
 print(f"In-Sample MAPE: {mean_absolute_percentage_error(df_long['Demand'], combined_fitted_series) * 100:.2f}%")
 
 # --- Final Plots ---
