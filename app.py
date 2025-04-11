@@ -96,7 +96,8 @@ if uploaded_file is not None:
     with st.spinner("🔄 Running cross-validation and optimizing weights..."):
         best_mae_global = float('inf')
         best_initial_window = 36
-        for window in [30, 36, 42]:
+        for window in [36]:  # Just one well-performing default
+
             mae, _ = run_cv(window)
             if mae < best_mae_global:
                 best_mae_global = mae
