@@ -93,61 +93,63 @@ if uploaded_file is not None:
                     best_weights = (w1, w2, w3)
         return best_mae, best_weights
 
-    best_mae_global = float('inf')
-    best_initial_window = 36
-    for window in range(24, 49):
-        mae, _ = run_cv(window)
-        if mae < best_mae_global:
-            best_mae_global = mae
-            best_initial_window = window
+    with st.spinner("🔄 Running cross-validation and optimizing weights..."):
+        best_mae_global = float('inf')
+        best_initial_window = 36
+        for window in range(24, 49):
+            mae, _ = run_cv(window)
+            if mae < best_mae_global:
+                best_mae_global = mae
+                best_initial_window = window
 
-    _, best_weights = run_cv(best_initial_window)
-    w1, w2, w3 = best_weights
+        _, best_weights = run_cv(best_initial_window)
+        w1, w2, w3 = best_weights
 
-    # --- Forecasting ---
-    sarima_model = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
-    sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
-    future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
-    sarima_future.index = future_index
+    with st.spinner("📈 Generating forecasts..."):
+        sarima_model = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+        sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
+        future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
+        sarima_future.index = future_index
 
-    df_prophet = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
-    df_prophet['cap'] = df_prophet['y'].max() * 3
-    df_prophet['floor'] = df_prophet['y'].min() * 0.5
-    df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
-    df_prophet = add_promotion_factors(df_prophet)
+        df_prophet = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
+        df_prophet['cap'] = df_prophet['y'].max() * 3
+        df_prophet['floor'] = df_prophet['y'].min() * 0.5
+        df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
+        df_prophet = add_promotion_factors(df_prophet)
 
-    model_prophet = Prophet(growth='logistic', yearly_seasonality=True)
-    model_prophet.add_regressor('company_growth')
-    model_prophet.add_regressor('Promotion')
-    model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
+        model_prophet = Prophet(growth='logistic', yearly_seasonality=True)
+        model_prophet.add_regressor('company_growth')
+        model_prophet.add_regressor('Promotion')
+        model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
 
-    future = model_prophet.make_future_dataframe(periods=12, freq='MS')
-    future['cap'] = df_prophet['cap'].iloc[0]
-    future['floor'] = df_prophet['floor'].iloc[0]
-    future['company_growth'] = future['ds'].dt.year - 2017
-    future = add_promotion_factors(future)
-    prophet_future = model_prophet.predict(future)['yhat'].values[-12:]
+        future = model_prophet.make_future_dataframe(periods=12, freq='MS')
+        future['cap'] = df_prophet['cap'].iloc[0]
+        future['floor'] = df_prophet['floor'].iloc[0]
+        future['company_growth'] = future['ds'].dt.year - 2017
+        future = add_promotion_factors(future)
+        prophet_future = model_prophet.predict(future)['yhat'].values[-12:]
 
-    hw_model = ExponentialSmoothing(df_long['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
-    hw_future = hw_model.forecast(12).values
+        hw_model = ExponentialSmoothing(df_long['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
+        hw_future = hw_model.forecast(12).values
 
-    combined_forecast = w1 * sarima_future.values + w2 * prophet_future + w3 * hw_future
+        combined_forecast = w1 * sarima_future.values + w2 * prophet_future + w3 * hw_future
 
-    # --- Workforce Scheduling ---
-    M = 12
-    S = 3
-    Productivity = 23
-    Cost = 8.5
-    Days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    Hours = [6, 6, 6]
+    with st.spinner("⚙️ Optimizing workforce schedule..."):
+        M = 12
+        S = 3
+        Productivity = 23
+        Cost = 8.5
+        Days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        Hours = [6, 6, 6]
 
-    model = LpProblem("Workforce_Scheduling", LpMinimize)
-    X = {(i, j): LpVariable(f"X_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
-    model += lpSum(Cost * X[i, j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
-    for i in range(M):
-        model += lpSum(Productivity * X[i, j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
-    model.solve()
+        model = LpProblem("Workforce_Scheduling", LpMinimize)
+        X = {(i, j): LpVariable(f"X_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
+        model += lpSum(Cost * X[i, j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
+        for i in range(M):
+            model += lpSum(Productivity * X[i, j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
+        model.solve()
 
+    # --- Display Results ---
     st.subheader("📊 Forecasted Demand & Workforce Required")
     st.write(f"**Optimal Weights:** SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | **Min MAE:** {best_mae_global:.2f}")
 
@@ -160,7 +162,6 @@ if uploaded_file is not None:
 
     st.dataframe(pd.DataFrame(results, columns=["Month", "Forecasted Demand", "Workers Required"]))
 
-    # --- Plot ---
     st.subheader("📈 Forecast Plots")
     fig, ax = plt.subplots(figsize=(14, 5))
     ax.plot(df_long.index, df_long['Demand'], label="Historical", marker='o')
