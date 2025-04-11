@@ -78,9 +78,7 @@ for i in range(M):
 model.solve()
 
 # --- 7. Output Results ---
-print(f"
-Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | MAE (CV): {best_mae_global:.2f}
-")
+print(f"\nBest Initial Window: {best_initial_window} months | Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | Min MAE: {best_mae_global:.2f}")
 print(f"{'Month':<10} {'Forecasted Demand':>20} {'Workers Required':>20}")
 print("=" * 55)
 for i in range(M):
