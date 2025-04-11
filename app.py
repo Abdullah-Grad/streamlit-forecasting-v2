@@ -7,27 +7,21 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
-#from google.colab import files
-
-# --- 1. Upload and Prepare the Demand Data ---
-print('Please upload your demand data file (Excel format).')
-import streamlit as st
 
 st.title("Demand Forecasting and Workforce Scheduling")
 uploaded_file = st.file_uploader("Upload your demand Excel file", type=["xlsx"])
 
 if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
-    # continue with reshaping and forecasting...
 
-# Reshape to long format
-month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-df_long = df.melt(id_vars='Year', value_vars=month_cols,
-                  var_name='Month', value_name='Demand')
-df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
-df_long = df_long.sort_values('Date').reset_index(drop=True)
-df_long.set_index('Date', inplace=True)
+    # --- Reshape to long format ---
+    month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    df_long = df.melt(id_vars='Year', value_vars=month_cols,
+                      var_name='Month', value_name='Demand')
+    df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
+    df_long = df_long.sort_values('Date').reset_index(drop=True)
+    df_long.set_index('Date', inplace=True)
 
 # --- 5. Forecast 2025 ---
 
