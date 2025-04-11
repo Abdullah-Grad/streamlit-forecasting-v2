@@ -9,7 +9,7 @@ from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
 
 st.set_page_config(layout="wide")
-st.title("Demand Forecasting & Workforce Scheduling")
+st.title("Test Demand Forecasting & Workforce Scheduling")
 
 uploaded_file = st.file_uploader("Upload your demand Excel file", type=["xlsx"])
 
