@@ -28,7 +28,6 @@ if uploaded_file:
         df_long = df_long.sort_values('Date').reset_index(drop=True)
         df_long.set_index('Date', inplace=True)
 
-        # --- Add Promotion Factors ---
         def add_promotion_factors(df):
             df['Promotion'] = 0
             for index, row in df.iterrows():
@@ -40,16 +39,14 @@ if uploaded_file:
                     df.at[index, 'Promotion'] = 1
             return df
 
-        # --- Cross-Validation ---
         def run_cv(initial_window):
-            n_splits = 12
+            n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
             actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
             for i in range(n_splits):
                 train_end = initial_window + i
                 train = df_long.iloc[:train_end]
                 test = df_long.iloc[train_end:train_end + 1]
-                if len(test) == 0:
-                    break
+                if len(test) == 0: break
 
                 try:
                     sarima = SARIMAX(train['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit(disp=False)
@@ -94,7 +91,6 @@ if uploaded_file:
                         best_weights = (w1,w2,w3)
             return best_mae, best_weights
 
-        # --- Optimize initial window ---
         best_mae_global = float('inf')
         for win in range(30, 49, 3):
             mae, _ = run_cv(win)
@@ -131,7 +127,6 @@ if uploaded_file:
 
         forecast = w1 * sarima_fc.values + w2 * prophet_fc + w3 * hw_fc
 
-        # --- Workforce optimization ---
         M, S = 12, 3
         Productivity = 23
         Cost = 8.5
@@ -145,7 +140,6 @@ if uploaded_file:
             model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= forecast[i]
         model.solve()
 
-        # --- Display ---
         st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
         st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
         st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
@@ -157,7 +151,6 @@ if uploaded_file:
         })
         st.dataframe(df_results)
 
-        # --- Forecast Plot ---
         fig, ax = plt.subplots(figsize=(12,5))
         ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
         ax.plot(future_index, forecast, label='Forecast (Weighted)', marker='o')
@@ -166,7 +159,6 @@ if uploaded_file:
         ax.grid()
         st.pyplot(fig)
 
-        # --- In-sample Fit ---
         sarima_fitted = sarima.fittedvalues
         hw_fitted = hw.fittedvalues
         prophet_fit = m.predict(dfp[['ds','cap','floor','company_growth','Promotion']])['yhat'].values
@@ -177,7 +169,6 @@ if uploaded_file:
         mape_fit = mean_absolute_percentage_error(df_long['Demand'], fit_series) * 100
         st.info(f"📎 In-Sample Fitted MAE: {mae_fit:.2f} | MAPE: {mape_fit:.2f}%")
 
-        # --- Fit Plot ---
         fig2, ax2 = plt.subplots(figsize=(12,5))
         ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
         ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
