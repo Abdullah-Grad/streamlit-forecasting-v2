@@ -10,11 +10,8 @@ from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
 
 # --- Streamlit setup ---
 st.set_page_config(layout='wide')
-st.markdown(
-    "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
-    unsafe_allow_html=True
-)
-st.title("Salasa Demand Forecasting & Workforce Requirements 📈")
+st.markdown("<div style='text-align: center;'><img src='logo.png' width='200'></div>", unsafe_allow_html=True)
+st.title("📈 Demand Forecasting & Workforce Scheduling")
 
 # --- Upload demand file ---
 uploaded_file = st.file_uploader("📤 Upload your Monthly Demand Excel File", type=["xlsx"])
@@ -40,20 +37,21 @@ if uploaded_file:
             return df
 
         # --- Cross-Validation ---
-
-      def run_cv(initial_window):
+        def run_cv(initial_window):
             n_splits = 12
             actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
             for i in range(n_splits):
                 train_end = initial_window + i
                 train = df_long.iloc[:train_end]
                 test = df_long.iloc[train_end:train_end + 1]
-                if len(test) == 0: break
+                if len(test) == 0:
+                    break
 
                 try:
                     sarima = SARIMAX(train['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit(disp=False)
                     sarima_preds.append(sarima.get_forecast(1).predicted_mean.values[0])
-                except: sarima_preds.append(0)
+                except:
+                    sarima_preds.append(0)
 
                 dfp = train.reset_index().rename(columns={'Date':'ds','Demand':'y'})
                 dfp['cap'] = dfp['y'].max()*3
@@ -91,6 +89,16 @@ if uploaded_file:
                         best_mae = mae
                         best_weights = (w1,w2,w3)
             return best_mae, best_weights
+
+        # --- Optimize initial window ---
+        best_mae_global = float('inf')
+        for win in range(30, 49, 3):
+            mae, _ = run_cv(win)
+            if mae < best_mae_global:
+                best_mae_global = mae
+                best_window = win
+        _, best_weights = run_cv(best_window)
+        w1, w2, w3 = best_weights
 
         # --- Forecast ---
         sarima = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
@@ -135,7 +143,7 @@ if uploaded_file:
 
         # --- Display ---
         st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
-        st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
+        st.info(f"📊 CV MAE: {best_mae_global:.2f}")
         st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
 
         df_results = pd.DataFrame({
@@ -149,7 +157,7 @@ if uploaded_file:
         fig, ax = plt.subplots(figsize=(12,5))
         ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
         ax.plot(future_index, forecast, label='Forecast (Weighted)', marker='o')
-        ax.set_title("Historical + Forecasted Demand")
+        ax.set_title("📉 Historical + Forecasted Demand")
         ax.legend()
         ax.grid()
         st.pyplot(fig)
@@ -169,7 +177,7 @@ if uploaded_file:
         fig2, ax2 = plt.subplots(figsize=(12,5))
         ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
         ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
-        ax2.set_title("In-Sample Fitted vs Actual")
+        ax2.set_title("📎 In-Sample Fitted vs Actual")
         ax2.grid()
         ax2.legend()
         st.pyplot(fig2)
