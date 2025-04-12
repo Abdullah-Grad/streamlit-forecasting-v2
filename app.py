@@ -41,63 +41,56 @@ if uploaded_file:
 
         # --- Cross-Validation ---
 
-        def run_cv(initial_window):
-    n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
-    actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
-    for i in range(n_splits):
-        train_end = initial_window + i
-        train = df_long.iloc[:train_end]
-        test = df_long.iloc[train_end:train_end + 1]
-        if len(test) == 0:
-            break
+      def run_cv(initial_window):
+            n_splits = 12
+            actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
+            for i in range(n_splits):
+                train_end = initial_window + i
+                train = df_long.iloc[:train_end]
+                test = df_long.iloc[train_end:train_end + 1]
+                if len(test) == 0: break
 
-        try:
-            sarima_model = SARIMAX(train['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(disp=False)
-            sarima_forecast = sarima_model.get_forecast(steps=1).predicted_mean.values[0]
-        except:
-            sarima_forecast = 0
+                try:
+                    sarima = SARIMAX(train['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit(disp=False)
+                    sarima_preds.append(sarima.get_forecast(1).predicted_mean.values[0])
+                except: sarima_preds.append(0)
 
-        df_prophet_train = train.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
-        df_prophet_train['cap'] = df_prophet_train['y'].max() * 3
-        df_prophet_train['floor'] = df_prophet_train['y'].min() * 0.5
-        df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
-        df_prophet_train = add_promotion_factors(df_prophet_train)
+                dfp = train.reset_index().rename(columns={'Date':'ds','Demand':'y'})
+                dfp['cap'] = dfp['y'].max()*3
+                dfp['floor'] = dfp['y'].min()*0.5
+                dfp['company_growth'] = dfp['ds'].dt.year - 2017
+                dfp = add_promotion_factors(dfp)
 
-        model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-        model_prophet.add_regressor('company_growth')
-        model_prophet.add_regressor('Promotion')
-        model_prophet.fit(df_prophet_train[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
+                m = Prophet(growth='logistic', yearly_seasonality=True)
+                m.add_regressor('company_growth')
+                m.add_regressor('Promotion')
+                m.fit(dfp[['ds','y','cap','floor','company_growth','Promotion']])
+                future = m.make_future_dataframe(1, freq='MS')
+                future['cap'] = dfp['cap'].iloc[0]
+                future['floor'] = dfp['floor'].iloc[0]
+                future['company_growth'] = future['ds'].dt.year - 2017
+                future = add_promotion_factors(future)
+                prophet_preds.append(m.predict(future)['yhat'].values[-1])
 
-        future = model_prophet.make_future_dataframe(periods=1, freq='MS')
-        future['cap'] = df_prophet_train['cap'].iloc[0]
-        future['floor'] = df_prophet_train['floor'].iloc[0]
-        future['company_growth'] = future['ds'].dt.year - 2017
-        future = add_promotion_factors(future)
-        prophet_forecast = model_prophet.predict(future)['yhat'].values[-1]
+                try:
+                    hw = ExponentialSmoothing(train['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
+                    hw_preds.append(hw.forecast(1).values[0])
+                except:
+                    hw_preds.append(train['Demand'].mean())
 
-        try:
-            hw_model = ExponentialSmoothing(train['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
-            hw_forecast = hw_model.forecast(1).values[0]
-        except:
-            hw_forecast = train['Demand'].mean()
+                actuals.append(test['Demand'].values[0])
 
-        actuals.append(test['Demand'].values[0])
-        sarima_preds.append(sarima_forecast)
-        prophet_preds.append(prophet_forecast)
-        hw_preds.append(hw_forecast)
-
-    best_mae = float('inf')
-    best_weights = (1/3, 1/3, 1/3)
-    for w1 in np.linspace(0, 1, 21):
-        for w2 in np.linspace(0, 1 - w1, 21):
-            w3 = 1 - w1 - w2
-            blended = w1 * np.array(sarima_preds) + w2 * np.array(prophet_preds) + w3 * np.array(hw_preds)
-            mae = mean_absolute_error(actuals, blended)
-            if mae < best_mae:
-                best_mae = mae
-                best_weights = (w1, w2, w3)
-
-    return best_mae, best_weights
+            best_mae = float('inf')
+            best_weights = (1/3,1/3,1/3)
+            for w1 in np.linspace(0,1,21):
+                for w2 in np.linspace(0,1-w1,21):
+                    w3 = 1 - w1 - w2
+                    blend = w1*np.array(sarima_preds) + w2*np.array(prophet_preds) + w3*np.array(hw_preds)
+                    mae = mean_absolute_error(actuals, blend)
+                    if mae < best_mae:
+                        best_mae = mae
+                        best_weights = (w1,w2,w3)
+            return best_mae, best_weights
 
         # --- Forecast ---
         sarima = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
