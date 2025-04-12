@@ -11,7 +11,18 @@ from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
 
 # --- Page Setup ---
 st.set_page_config(layout='wide')
+# Streamlit page title
 st.title("📈 Demand Forecasting & Workforce Scheduling")
+
+# Show logo centered
+st.markdown(
+    """
+    <div style='text-align: center; padding-bottom: 20px;'>
+        <img src='logo.png' width='200'/>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- Upload Demand File ---
 st.subheader("Upload Monthly Demand Excel File")
