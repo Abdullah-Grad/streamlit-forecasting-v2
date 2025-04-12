@@ -141,7 +141,7 @@ if uploaded_file:
 
         # --- Display ---
         st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
-        st.info(f"📊 CV MAE: {best_mae_global:.2f}")
+        st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
         st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
 
         df_results = pd.DataFrame({
@@ -155,7 +155,7 @@ if uploaded_file:
         fig, ax = plt.subplots(figsize=(12,5))
         ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
         ax.plot(future_index, forecast, label='Forecast (Weighted)', marker='o')
-        ax.set_title("📉 Historical + Forecasted Demand")
+        ax.set_title("Historical + Forecasted Demand")
         ax.legend()
         ax.grid()
         st.pyplot(fig)
@@ -175,7 +175,7 @@ if uploaded_file:
         fig2, ax2 = plt.subplots(figsize=(12,5))
         ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
         ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
-        ax2.set_title("📎 In-Sample Fitted vs Actual")
+        ax2.set_title("In-Sample Fitted vs Actual")
         ax2.grid()
         ax2.legend()
         st.pyplot(fig2)
