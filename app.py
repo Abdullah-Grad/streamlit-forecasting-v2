@@ -104,7 +104,7 @@ def run_cv(initial_window):
 
     return best_mae, best_weights
 
-  best_mae_global = float('inf')
+best_mae_global = float('inf')
 best_initial_window = 36
 for window in range(30, 49, 3):
     mae, _ = run_cv(window)
