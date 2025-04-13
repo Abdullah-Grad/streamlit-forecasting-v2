@@ -28,7 +28,7 @@ if uploaded_file:
         df_long = df_long.sort_values('Date').reset_index(drop=True)
         df_long.set_index('Date', inplace=True)
 
-     def add_promotion_factors(df):
+def add_promotion_factors(df):
     df['Promotion'] = 0
     for index, row in df.iterrows():
         if (row['ds'].month == 4 and row['ds'].year in [2023, 2024]) or \
@@ -44,6 +44,7 @@ if uploaded_file:
         elif row['ds'].month == 12:
             df.at[index, 'Promotion'] = 1
     return df
+
 
      def run_cv(initial_window):
     n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
