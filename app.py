@@ -152,52 +152,52 @@ hw_future = hw_model_full.forecast(12).values
 w1, w2, w3 = best_weights
 combined_forecast = w1 * sarima_future.values + w2 * prophet_future + w3 * hw_future
 
-        M, S = 12, 3
-        Productivity = 23
-        Cost = 8.5
-        Days = [31,28,31,30,31,30,31,31,30,31,30,31]
-        Hours = [6,6,6]
+M, S = 12, 3
+Productivity = 23
+Cost = 8.5
+Days = [31,28,31,30,31,30,31,31,30,31,30,31]
+Hours = [6,6,6]
 
-        model = LpProblem("Workforce", LpMinimize)
-        X = {(i,j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
-        model += lpSum(Cost * X[i,j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
-        for i in range(M):
-            model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= forecast[i]
-        model.solve()
+model = LpProblem("Workforce", LpMinimize)
+X = {(i,j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
+model += lpSum(Cost * X[i,j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
+for i in range(M):
+     model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= forecast[i]
+model.solve()
 
-        st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
-        st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
-        st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
+st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
+st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
+st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
 
-        df_results = pd.DataFrame({
-            'Month': [d.strftime('%b %Y') for d in future_index],
-            '📈 Forecasted Demand': forecast,
-            '👷 Workers Required': [sum(value(X[i,j]) for j in range(S)) for i in range(M)]
+df_results = pd.DataFrame({
+    'Month': [d.strftime('%b %Y') for d in future_index],
+    '📈 Forecasted Demand': forecast,
+    '👷 Workers Required': [sum(value(X[i,j]) for j in range(S)) for i in range(M)]
         })
-        st.dataframe(df_results)
+st.dataframe(df_results)
 
-        fig, ax = plt.subplots(figsize=(12,5))
-        ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
-        ax.plot(future_index, forecast, label='Forecast (Weighted)', marker='o')
-        ax.set_title("Historical + Forecasted Demand")
-        ax.legend()
-        ax.grid()
-        st.pyplot(fig)
+fig, ax = plt.subplots(figsize=(12,5))
+ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
+ax.plot(future_index, forecast, label='Forecast (Weighted)', marker='o')
+ax.set_title("Historical + Forecasted Demand")
+ax.legend()
+ax.grid()
+st.pyplot(fig)
 
-        sarima_fitted = sarima.fittedvalues
-        hw_fitted = hw.fittedvalues
-        prophet_fit = m.predict(dfp[['ds','cap','floor','company_growth','Promotion']])['yhat'].values
-        combined_fit = w1 * sarima_fitted.values + w2 * prophet_fit + w3 * hw_fitted.values
-        fit_series = pd.Series(combined_fit, index=df_long.index)
+sarima_fitted = sarima.fittedvalues
+hw_fitted = hw.fittedvalues
+prophet_fit = m.predict(dfp[['ds','cap','floor','company_growth','Promotion']])['yhat'].values
+combined_fit = w1 * sarima_fitted.values + w2 * prophet_fit + w3 * hw_fitted.values
+fit_series = pd.Series(combined_fit, index=df_long.index)
 
-        mae_fit = mean_absolute_error(df_long['Demand'], fit_series)
-        mape_fit = mean_absolute_percentage_error(df_long['Demand'], fit_series) * 100
-        st.info(f"📎 In-Sample Fitted MAE: {mae_fit:.2f} | MAPE: {mape_fit:.2f}%")
+mae_fit = mean_absolute_error(df_long['Demand'], fit_series)
+mape_fit = mean_absolute_percentage_error(df_long['Demand'], fit_series) * 100
+st.info(f"📎 In-Sample Fitted MAE: {mae_fit:.2f} | MAPE: {mape_fit:.2f}%")
 
-        fig2, ax2 = plt.subplots(figsize=(12,5))
-        ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
-        ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
-        ax2.set_title("In-Sample Fitted vs Actual")
-        ax2.grid()
-        ax2.legend()
-        st.pyplot(fig2)
+fig2, ax2 = plt.subplots(figsize=(12,5))
+ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
+ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
+ax2.set_title("In-Sample Fitted vs Actual")
+ax2.grid()
+ax2.legend()
+st.pyplot(fig2)
