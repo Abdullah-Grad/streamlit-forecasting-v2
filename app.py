@@ -46,7 +46,7 @@ def add_promotion_factors(df):
     return df
 
 
-     def run_cv(initial_window):
+def run_cv(initial_window):
     n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
     actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
     for i in range(n_splits):
