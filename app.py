@@ -51,10 +51,9 @@ if uploaded_file:
             train_end = initial_window + i
             train = df_long.iloc[:train_end]
             test = df_long.iloc[train_end:train_end + 1]
-            # SARIMAX model forecast
+            # SARIMAX forecast
             try:
-                sarima_model = SARIMAX(train['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)) \
-                               .fit(disp=False)
+                sarima_model = SARIMAX(train['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(disp=False)
                 sarima_forecast = sarima_model.get_forecast(steps=1).predicted_mean.values[0]
             except Exception:
                 sarima_forecast = 0
@@ -66,7 +65,7 @@ if uploaded_file:
             df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
             df_prophet_train = add_promotion_factors(df_prophet_train)
 
-            # Prophet model forecast
+            # Prophet forecast
             model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
                                     weekly_seasonality=False, daily_seasonality=False)
             model_prophet.add_regressor('company_growth')
@@ -90,9 +89,10 @@ if uploaded_file:
             actual = test['Demand'].values[0]
             return (actual, sarima_forecast, prophet_forecast, hw_forecast)
 
-        # --- Updated CV routine using parallel processing ---
+        # --- Updated CV routine using parallel processing with fewer folds & coarser grid search ---
         def run_cv(df_long, initial_window):
-            n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
+            # Limit the number of CV folds to at most 12 for faster computation
+            n_splits = min(len(df_long) - initial_window, 12)
             results = []
             with ProcessPoolExecutor() as executor:
                 futures = [executor.submit(cv_fold, i, initial_window, df_long)
@@ -101,11 +101,11 @@ if uploaded_file:
                     results.append(future.result())
             actuals, sarima_preds, prophet_preds, hw_preds = zip(*results)
 
-            # Grid search for best blend weights (441 iterations)
+            # Use coarser grid search (11 intervals per weight dimension → 121 iterations)
             best_mae = float('inf')
             best_weights = (1/3, 1/3, 1/3)
-            for w1 in np.linspace(0, 1, 21):
-                for w2 in np.linspace(0, 1 - w1, 21):
+            for w1 in np.linspace(0, 1, 11):
+                for w2 in np.linspace(0, 1 - w1, 11):
                     w3 = 1 - w1 - w2
                     blended = w1 * np.array(sarima_preds) + w2 * np.array(prophet_preds) + w3 * np.array(hw_preds)
                     mae = mean_absolute_error(actuals, blended)
@@ -168,16 +168,16 @@ if uploaded_file:
 
         model = LpProblem("Workforce", LpMinimize)
         X = {(i,j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
-        model += lpSum(Cost * X[i, j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
+        model += lpSum(Cost * X[i,j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
         for i in range(M):
-            model += lpSum(Productivity * X[i, j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
+            model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
         model.solve()
         st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
 
         df_results = pd.DataFrame({
             'Month': [d.strftime('%b %Y') for d in future_index],
             '📈 Forecasted Demand': combined_forecast,
-            '👷 Workers Required': [sum(value(X[i, j]) for j in range(S)) for i in range(M)]
+            '👷 Workers Required': [sum(value(X[i,j]) for j in range(S)) for i in range(M)]
         })
         st.dataframe(df_results)
 
