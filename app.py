@@ -17,39 +17,16 @@ st.markdown(
 
 st.title("Salasa Demand Forecasting & Workforce Requirements 📈")
 
-# --- Caching Data Preprocessing ---
-@st.cache_data
-def load_and_prepare_data(uploaded_file):
-    df = pd.read_excel(uploaded_file)
-    month_cols = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-    df_long = df.melt(id_vars='Year', value_vars=month_cols, var_name='Month', value_name='Demand')
-    df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
-    df_long = df_long.sort_values('Date').reset_index(drop=True)
-    df_long.set_index('Date', inplace=True)
-    return df_long
-
-# --- Cache model training functions ---
-@st.cache_resource
-def train_sarima_model(train_data):
-    return SARIMAX(train_data, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(disp=False)
-
-@st.cache_resource
-def train_hw_model(train_data):
-    return ExponentialSmoothing(train_data, trend='add', seasonal='add', seasonal_periods=12).fit()
-
-@st.cache_resource
-def train_prophet_model(df_prophet):
-    model = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-    model.add_regressor('company_growth')
-    model.add_regressor('Promotion')
-    model.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
-    return model
-
-# --- File Upload and Model Execution ---
-uploaded_file = st.file_uploader("📄 Upload your Monthly Demand Excel File", type=["xlsx"])
+# --- Upload demand file ---
+uploaded_file = st.file_uploader("📤 Upload your Monthly Demand Excel File", type=["xlsx"])
 if uploaded_file:
     with st.spinner("⏳ Processing data and building model..."):
-        df_long = load_and_prepare_data(uploaded_file)
+        df = pd.read_excel(uploaded_file)
+        month_cols = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        df_long = df.melt(id_vars='Year', value_vars=month_cols, var_name='Month', value_name='Demand')
+        df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
+        df_long = df_long.sort_values('Date').reset_index(drop=True)
+        df_long.set_index('Date', inplace=True)
 
         def add_promotion_factors(df):
             df['Promotion'] = 0
