@@ -14,7 +14,6 @@ st.markdown(
     "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
     unsafe_allow_html=True
 )
-
 st.title("Salasa Demand Forecasting & Workforce Requirements 📈")
 
 # --- Upload demand file ---
@@ -28,21 +27,22 @@ if uploaded_file:
         df_long = df_long.sort_values('Date').reset_index(drop=True)
         df_long.set_index('Date', inplace=True)
 
+        # --- Vectorized promotion factors assignment ---
         def add_promotion_factors(df):
-            df['Promotion'] = 0
-            for index, row in df.iterrows():
-                if (row['ds'].month == 4 and row['ds'].year in [2023, 2024]) or \
-                   (row['ds'].month == 5 and row['ds'].year in [2020, 2021, 2022]) or \
-                   (row['ds'].month == 6 and row['ds'].year == 2019):
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 9:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 2 and row['ds'].year >= 2022:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 11:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 12:
-                    df.at[index, 'Promotion'] = 1
+            # Assume the date column is named 'ds' (as used in Prophet training)
+            months = df['ds'].dt.month
+            years = df['ds'].dt.year
+            # Build the condition exactly as in the original logic:
+            condition = (
+                ((months == 4) & (years.isin([2023, 2024]))) |
+                ((months == 5) & (years.isin([2020, 2021, 2022]))) |
+                ((months == 6) & (years == 2019)) |
+                (months == 9) |
+                ((months == 2) & (years >= 2022)) |
+                (months == 11) |
+                (months == 12)
+            )
+            df['Promotion'] = condition.astype(int)
             return df
 
         def run_cv(initial_window):
@@ -52,22 +52,25 @@ if uploaded_file:
                 train_end = initial_window + i
                 train = df_long.iloc[:train_end]
                 test = df_long.iloc[train_end:train_end + 1]
-                if len(test) == 0:
+                if test.empty:
                     break
 
+                # --- SARIMAX forecast ---
                 try:
                     sarima_model = SARIMAX(train['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(disp=False)
                     sarima_forecast = sarima_model.get_forecast(steps=1).predicted_mean.values[0]
-                except:
+                except Exception:
                     sarima_forecast = 0
 
+                # --- Prophet forecast ---
                 df_prophet_train = train.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
                 df_prophet_train['cap'] = df_prophet_train['y'].max() * 3
                 df_prophet_train['floor'] = df_prophet_train['y'].min() * 0.5
                 df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
                 df_prophet_train = add_promotion_factors(df_prophet_train)
 
-                model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+                model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                        weekly_seasonality=False, daily_seasonality=False)
                 model_prophet.add_regressor('company_growth')
                 model_prophet.add_regressor('Promotion')
                 model_prophet.fit(df_prophet_train[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
@@ -79,10 +82,11 @@ if uploaded_file:
                 future = add_promotion_factors(future)
                 prophet_forecast = model_prophet.predict(future)['yhat'].values[-1]
 
+                # --- Exponential Smoothing forecast ---
                 try:
                     hw_model = ExponentialSmoothing(train['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
                     hw_forecast = hw_model.forecast(1).values[0]
-                except:
+                except Exception:
                     hw_forecast = train['Demand'].mean()
 
                 actuals.append(test['Demand'].values[0])
@@ -128,7 +132,8 @@ if uploaded_file:
         df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
         df_prophet = add_promotion_factors(df_prophet)
 
-        model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+        model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                weekly_seasonality=False, daily_seasonality=False)
         model_prophet.add_regressor('company_growth')
         model_prophet.add_regressor('Promotion')
         model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
@@ -152,7 +157,7 @@ if uploaded_file:
         Hours = [6,6,6]
 
         model = LpProblem("Workforce", LpMinimize)
-        X = {(i,j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
+        X = {(i, j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
         model += lpSum(Cost * X[i,j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
         for i in range(M):
             model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
