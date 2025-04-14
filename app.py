@@ -14,7 +14,6 @@ st.markdown(
     "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
     unsafe_allow_html=True
 )
-
 st.title("Salasa Demand Forecasting & Workforce Requirements 📈")
 
 # --- Upload demand file ---
@@ -28,24 +27,25 @@ if uploaded_file:
         df_long = df_long.sort_values('Date').reset_index(drop=True)
         df_long.set_index('Date', inplace=True)
 
+        # --- Vectorized promotion factors assignment ---
         def add_promotion_factors(df):
-            df['Promotion'] = 0
-            for index, row in df.iterrows():
-                if (row['ds'].month == 4 and row['ds'].year in [2023, 2024]) or \
-                   (row['ds'].month == 5 and row['ds'].year in [2020, 2021, 2022]) or \
-                   (row['ds'].month == 6 and row['ds'].year == 2019):
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 9:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 2 and row['ds'].year >= 2022:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 11:
-                    df.at[index, 'Promotion'] = 1
-                elif row['ds'].month == 12:
-                    df.at[index, 'Promotion'] = 1
+            # Assumes the date column is 'ds'
+            month = df['ds'].dt.month
+            year = df['ds'].dt.year
+            condition = (
+                ((month == 4) & (year.isin([2023, 2024]))) |
+                ((month == 5) & (year.isin([2020, 2021, 2022]))) |
+                ((month == 6) & (year == 2019)) |
+                (month == 9) |
+                ((month == 2) & (year >= 2022)) |
+                (month == 11) |
+                (month == 12)
+            )
+            df['Promotion'] = condition.astype(int)
             return df
 
-        def run_cv(initial_window):
+        # --- Cross-validation function ---
+        def run_cv(df_long, initial_window):
             n_splits = min(len(df_long) - initial_window, max(12, (len(df_long) - initial_window) // 2))
             actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
             for i in range(n_splits):
@@ -61,13 +61,15 @@ if uploaded_file:
                 except:
                     sarima_forecast = 0
 
+                # Prepare data for Prophet in a vectorized manner
                 df_prophet_train = train.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
                 df_prophet_train['cap'] = df_prophet_train['y'].max() * 3
                 df_prophet_train['floor'] = df_prophet_train['y'].min() * 0.5
                 df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
                 df_prophet_train = add_promotion_factors(df_prophet_train)
 
-                model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+                model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                        weekly_seasonality=False, daily_seasonality=False)
                 model_prophet.add_regressor('company_growth')
                 model_prophet.add_regressor('Promotion')
                 model_prophet.fit(df_prophet_train[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
@@ -90,6 +92,7 @@ if uploaded_file:
                 prophet_preds.append(prophet_forecast)
                 hw_preds.append(hw_forecast)
 
+            # Grid search for best weights (441 iterations, which is fast enough)
             best_mae = float('inf')
             best_weights = (1/3, 1/3, 1/3)
             for w1 in np.linspace(0, 1, 21):
@@ -103,19 +106,23 @@ if uploaded_file:
 
             return best_mae, best_weights
 
+        # --- Find optimal initial window & weights (avoid duplicate computations) ---
+        window_results = {}
         best_mae_global = float('inf')
         best_initial_window = 36
         for window in range(30, 49, 3):
-            mae, _ = run_cv(window)
+            mae, weights = run_cv(df_long, window)
+            window_results[window] = (mae, weights)
             if mae < best_mae_global:
                 best_mae_global = mae
                 best_initial_window = window
 
-        _, best_weights = run_cv(best_initial_window)
+        best_mae, best_weights = window_results[best_initial_window]
         w1, w2, w3 = best_weights
         st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
         st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
 
+        # --- Refit models on full series ---
         sarima_model = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
         sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
         future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
@@ -127,11 +134,11 @@ if uploaded_file:
         df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
         df_prophet = add_promotion_factors(df_prophet)
 
-        model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+        model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                weekly_seasonality=False, daily_seasonality=False)
         model_prophet.add_regressor('company_growth')
         model_prophet.add_regressor('Promotion')
         model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
-
         future = model_prophet.make_future_dataframe(periods=12, freq='MS')
         future['cap'] = df_prophet['cap'].iloc[0]
         future['floor'] = df_prophet['floor'].iloc[0]
@@ -144,6 +151,7 @@ if uploaded_file:
 
         combined_forecast = w1 * sarima_future.values + w2 * prophet_future + w3 * hw_future
 
+        # --- Workforce optimization ---
         M, S = 12, 3
         Productivity = 23
         Cost = 8.5
@@ -166,6 +174,7 @@ if uploaded_file:
         })
         st.dataframe(df_results)
 
+        # --- Plot Historical + Forecasted Demand ---
         fig, ax = plt.subplots(figsize=(12,5))
         ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
         ax.plot(future_index, combined_forecast, label='Forecast (Weighted)', marker='o')
@@ -174,6 +183,7 @@ if uploaded_file:
         ax.grid()
         st.pyplot(fig)
 
+        # --- In-sample fit evaluation ---
         sarima_fitted = sarima_model.fittedvalues
         hw_fitted = hw_model_full.fittedvalues
         prophet_fit = model_prophet.predict(df_prophet[['ds','cap','floor','company_growth','Promotion']])['yhat'].values
