@@ -7,6 +7,7 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
+from scipy.optimize import minimize
 
 # --- Streamlit setup ---
 st.set_page_config(layout='wide')
@@ -25,12 +26,14 @@ if uploaded_file:
         month_cols = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
         df_long = df.melt(id_vars='Year', value_vars=month_cols,
                           var_name='Month', value_name='Demand')
-        df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
+        df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'],
+                                         format='%Y-%b')
         df_long = df_long.sort_values('Date').reset_index(drop=True)
         df_long.set_index('Date', inplace=True)
 
-        # --- Simple promotion factors assignment (using vectorized operations) ---
+        # --- Vectorized promotion factors assignment ---
         def add_promotion_factors(df):
+            # Assumes column 'ds' holds dates
             month = df['ds'].dt.month
             year = df['ds'].dt.year
             condition = (
@@ -45,87 +48,109 @@ if uploaded_file:
             df['Promotion'] = condition.astype(int)
             return df
 
-        # --- Simplified Cross-Validation: Use the last 12 months as a hold-out period ---
-        def simple_cv():
-            # Define number of folds as 12 (one per month in our hold-out period)
-            n_folds = 12
-            # The initial training window is all data except the final 12 months
-            initial_window = len(df_long) - n_folds
-            actuals, sarima_preds, prophet_preds, hw_preds = [], [], [], []
-
+        # --- Robust cross-validation using optimizer for weight selection ---
+        def cv_for_window(initial_window):
+            # Use all available folds with training expanding until the end
+            n_folds = len(df_long) - initial_window
+            actuals = []
+            sarima_forecasts = []
+            prophet_forecasts = []
+            hw_forecasts = []
+            
+            # Loop through each fold (each month in the hold-out period)
             for i in range(n_folds):
+                # Expanding training window: from start until (initial_window + i)
                 train = df_long.iloc[:initial_window + i]
                 test = df_long.iloc[initial_window + i: initial_window + i + 1]
                 if test.empty:
                     break
 
-                # SARIMAX forecast
+                # --- SARIMAX forecast ---
                 try:
                     sarima_model = SARIMAX(train['Demand'], order=(1, 1, 1),
                                            seasonal_order=(1, 1, 1, 12)).fit(disp=False)
-                    sarima_forecast = sarima_model.get_forecast(steps=1).predicted_mean.values[0]
+                    sarima_pred = sarima_model.get_forecast(steps=1).predicted_mean.values[0]
                 except Exception:
-                    sarima_forecast = 0
+                    sarima_pred = 0
 
-                # Prepare data for Prophet
+                # --- Prophet forecast ---
                 df_prophet_train = train.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
                 df_prophet_train['cap'] = df_prophet_train['y'].max() * 3
                 df_prophet_train['floor'] = df_prophet_train['y'].min() * 0.5
                 df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
                 df_prophet_train = add_promotion_factors(df_prophet_train)
 
-                model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
-                                        weekly_seasonality=False, daily_seasonality=False)
+                model_prophet = Prophet(growth='logistic',
+                                        yearly_seasonality=True,
+                                        weekly_seasonality=False,
+                                        daily_seasonality=False)
                 model_prophet.add_regressor('company_growth')
                 model_prophet.add_regressor('Promotion')
-                model_prophet.fit(df_prophet_train[['ds','y','cap','floor','company_growth','Promotion']])
+                model_prophet.fit(df_prophet_train[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
                 future = model_prophet.make_future_dataframe(periods=1, freq='MS')
                 future['cap'] = df_prophet_train['cap'].iloc[0]
                 future['floor'] = df_prophet_train['floor'].iloc[0]
                 future['company_growth'] = future['ds'].dt.year - 2017
                 future = add_promotion_factors(future)
-                prophet_forecast = model_prophet.predict(future)['yhat'].values[-1]
+                prophet_pred = model_prophet.predict(future)['yhat'].values[-1]
 
-                # Exponential Smoothing forecast
+                # --- Exponential Smoothing forecast ---
                 try:
                     hw_model = ExponentialSmoothing(train['Demand'], trend='add',
                                                     seasonal='add', seasonal_periods=12).fit()
-                    hw_forecast = hw_model.forecast(1).values[0]
+                    hw_pred = hw_model.forecast(1).values[0]
                 except Exception:
-                    hw_forecast = train['Demand'].mean()
+                    hw_pred = train['Demand'].mean()
 
+                # Append results from this fold
                 actuals.append(test['Demand'].values[0])
-                sarima_preds.append(sarima_forecast)
-                prophet_preds.append(prophet_forecast)
-                hw_preds.append(hw_forecast)
+                sarima_forecasts.append(sarima_pred)
+                prophet_forecasts.append(prophet_pred)
+                hw_forecasts.append(hw_pred)
 
-            # Use a coarser grid (e.g. 11 points per dimension) to quickly optimize the blend
-            best_mae = float('inf')
-            best_weights = (1/3, 1/3, 1/3)
-            for w1 in np.linspace(0, 1, 11):
-                for w2 in np.linspace(0, 1 - w1, 11):
-                    w3 = 1 - w1 - w2
-                    blended = w1 * np.array(sarima_preds) + w2 * np.array(prophet_preds) + w3 * np.array(hw_preds)
-                    mae = mean_absolute_error(actuals, blended)
-                    if mae < best_mae:
-                        best_mae = mae
-                        best_weights = (w1, w2, w3)
-            return best_mae, best_weights
+            # --- Optimize blend weights via minimization ---
+            forecasts = np.column_stack([sarima_forecasts, prophet_forecasts, hw_forecasts])
+            
+            def objective(weights):
+                blended = np.dot(forecasts, weights)
+                return mean_absolute_error(actuals, blended)
+            
+            # Constraint: weights sum to 1, and each is between 0 and 1
+            constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+            bounds = [(0, 1), (0, 1), (0, 1)]
+            result = minimize(objective, x0=[1/3, 1/3, 1/3], bounds=bounds, constraints=constraints)
+            best_weights = result.x
+            best_mae = result.fun
+            
+            return best_mae, best_weights, initial_window, n_folds
 
-        # Run our simplified CV (only one set of folds)
-        cv_mae, best_weights = simple_cv()
-        st.info(f"📊 CV folds used: 12")
-        w1, w2, w3 = best_weights
+        # --- Iterate over candidate initial windows to select the best ---
+        candidate_windows = range(30, 49, 3)
+        best_overall_mae = float('inf')
+        best_initial_window = None
+        best_weights_global = None
+        best_n_folds = None
+        for window in candidate_windows:
+            mae, weights, init_win, n_folds = cv_for_window(window)
+            if mae < best_overall_mae:
+                best_overall_mae = mae
+                best_initial_window = init_win
+                best_weights_global = weights
+                best_n_folds = n_folds
+
+        st.info(f"📊 CV folds used (for best window): {best_n_folds}")
+        w1, w2, w3 = best_weights_global
         st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
-        st.info(f"📊 Cross-Validation MAE: {cv_mae:.2f}")
+        st.info(f"📊 Cross-Validation MAE: {best_overall_mae:.2f} (Initial window = {best_initial_window} months)")
 
         # --- Refit models on the full series and forecast the next 12 months ---
         sarima_model = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
         sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
-        future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
+        future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1),
+                                     periods=12, freq='MS')
         sarima_future.index = future_index
 
-        df_prophet = df_long.reset_index().rename(columns={'Date':'ds','Demand':'y'})
+        df_prophet = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
         df_prophet['cap'] = df_prophet['y'].max() * 3
         df_prophet['floor'] = df_prophet['y'].min() * 0.5
         df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
@@ -157,24 +182,25 @@ if uploaded_file:
         Hours = [6,6,6]
 
         model = LpProblem("Workforce", LpMinimize)
-        X = {(i,j): LpVariable(f"x_{i}_{j}", lowBound=0, cat='Integer') for i in range(M) for j in range(S)}
-        model += lpSum(Cost * X[i,j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
+        X = {(i, j): LpVariable(f"x_{i}_{j}", lowBound=0, cat="Integer")
+             for i in range(M) for j in range(S)}
+        model += lpSum(Cost * X[i, j] * Hours[j] * Days[i] for i in range(M) for j in range(S))
         for i in range(M):
-            model += lpSum(Productivity * X[i,j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
+            model += lpSum(Productivity * X[i, j] * Hours[j] * Days[i] for j in range(S)) >= combined_forecast[i]
         model.solve()
         st.info(f"💰 Total Workforce Cost: {value(model.objective):,.2f} SAR")
 
         df_results = pd.DataFrame({
-            'Month': [d.strftime('%b %Y') for d in future_index],
-            '📈 Forecasted Demand': combined_forecast,
-            '👷 Workers Required': [sum(value(X[i,j]) for j in range(S)) for i in range(M)]
+            "Month": [d.strftime("%b %Y") for d in future_index],
+            "📈 Forecasted Demand": combined_forecast,
+            "👷 Workers Required": [sum(value(X[i, j]) for j in range(S)) for i in range(M)]
         })
         st.dataframe(df_results)
 
-        # --- Plotting ---
+        # --- Plot Historical + Forecasted Demand ---
         fig, ax = plt.subplots(figsize=(12,5))
-        ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
-        ax.plot(future_index, combined_forecast, label='Forecast (Weighted)', marker='o')
+        ax.plot(df_long.index, df_long["Demand"], label="Historical", marker="o")
+        ax.plot(future_index, combined_forecast, label="Forecast (Weighted)", marker="o")
         ax.set_title("Historical + Forecasted Demand")
         ax.legend()
         ax.grid()
@@ -183,17 +209,17 @@ if uploaded_file:
         # --- In-sample fit evaluation ---
         sarima_fitted = sarima_model.fittedvalues
         hw_fitted = hw_model_full.fittedvalues
-        prophet_fit = model_prophet.predict(df_prophet[['ds','cap','floor','company_growth','Promotion']])['yhat'].values
+        prophet_fit = model_prophet.predict(df_prophet[["ds","cap","floor","company_growth","Promotion"]])["yhat"].values
         combined_fit = w1 * sarima_fitted.values + w2 * prophet_fit + w3 * hw_fitted.values
         fit_series = pd.Series(combined_fit, index=df_long.index)
 
-        mae_fit = mean_absolute_error(df_long['Demand'], fit_series)
-        mape_fit = mean_absolute_percentage_error(df_long['Demand'], fit_series) * 100
+        mae_fit = mean_absolute_error(df_long["Demand"], fit_series)
+        mape_fit = mean_absolute_percentage_error(df_long["Demand"], fit_series) * 100
         st.info(f"📎 In-Sample Fitted MAE: {mae_fit:.2f} | MAPE: {mape_fit:.2f}%")
 
         fig2, ax2 = plt.subplots(figsize=(12,5))
-        ax2.plot(df_long.index, df_long['Demand'], label='Actual', marker='o')
-        ax2.plot(df_long.index, fit_series, label='Fitted (Weighted)', marker='x', linestyle='--')
+        ax2.plot(df_long.index, df_long["Demand"], label="Actual", marker="o")
+        ax2.plot(df_long.index, fit_series, label="Fitted (Weighted)", marker="x", linestyle="--")
         ax2.set_title("In-Sample Fitted vs Actual")
         ax2.grid()
         ax2.legend()
