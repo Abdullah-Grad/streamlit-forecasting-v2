@@ -10,19 +10,25 @@ from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
 
 # --- Streamlit setup ---
 st.set_page_config(layout='wide')
+st.markdown(
+    "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
+    unsafe_allow_html=True
+)
+
 st.title("Salasa Demand Forecasting & Workforce Requirements 📈")
 
 # --- Upload demand file ---
 uploaded_file = st.file_uploader("📤 Upload your Monthly Demand Excel File", type=["xlsx"])
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    df_long = df.melt(id_vars='Year', value_vars=month_cols,
-                      var_name='Month', value_name='Demand')
-    df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
-    df_long = df_long.sort_values('Date').reset_index(drop=True)
-    df_long.set_index('Date', inplace=True)
+    with st.spinner("⏳ Preparing data..."):
+        df = pd.read_excel(uploaded_file)
+        month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        df_long = df.melt(id_vars='Year', value_vars=month_cols,
+                          var_name='Month', value_name='Demand')
+        df_long['Date'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Month'], format='%Y-%b')
+        df_long = df_long.sort_values('Date').reset_index(drop=True)
+        df_long.set_index('Date', inplace=True)
 
     def add_promotion_factors(df):
         df['Promotion'] = 0
@@ -93,55 +99,55 @@ if uploaded_file:
 
         return best_mae, best_weights
 
-    best_mae_global = float('inf')
-    best_initial_window = 36
-    for window in range(30, 49, 3):
-        mae, _ = run_cv(window)
-        if mae < best_mae_global:
-            best_mae_global = mae
-            best_initial_window = window
+    with st.spinner("🔍 Running cross-validation to find optimal model weights..."):
+        best_mae_global = float('inf')
+        best_initial_window = 36
+        for window in range(30, 49, 3):
+            mae, _ = run_cv(window)
+            if mae < best_mae_global:
+                best_mae_global = mae
+                best_initial_window = window
 
-    _, best_weights = run_cv(best_initial_window)
-    w1, w2, w3 = best_weights
+        _, best_weights = run_cv(best_initial_window)
+        w1, w2, w3 = best_weights
 
     st.info(f"📊 CV splits used: {len(df_long) - best_initial_window}")
     st.success(f"✅ Optimal Weights: SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f}")
     st.info(f"📊 Cross-Validation MAE: {best_mae_global:.2f}")
 
-    # --- Forecast Steps ---
-    forecast_steps = 12
-    sarima_model = SARIMAX(df_long['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit()
-    sarima_forecast = sarima_model.get_forecast(steps=forecast_steps).predicted_mean
-    future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=forecast_steps, freq='MS')
-    sarima_forecast.index = future_index
+    with st.spinner("📈 Forecasting demand for next 12 months..."):
+        sarima_model = SARIMAX(df_long['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit()
+        sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
+        future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
+        sarima_future.index = future_index
 
-    df_prophet = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
-    df_prophet['cap'] = df_prophet['y'].max() * 3
-    df_prophet['floor'] = df_prophet['y'].min() * 0.5
-    df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
-    df_prophet = add_promotion_factors(df_prophet)
+        df_prophet = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
+        df_prophet['cap'] = df_prophet['y'].max() * 3
+        df_prophet['floor'] = df_prophet['y'].min() * 0.5
+        df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
+        df_prophet = add_promotion_factors(df_prophet)
 
-    model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-    model_prophet.add_regressor('company_growth')
-    model_prophet.add_regressor('Promotion')
-    model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
+        model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+        model_prophet.add_regressor('company_growth')
+        model_prophet.add_regressor('Promotion')
+        model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
 
-    future = model_prophet.make_future_dataframe(periods=forecast_steps, freq='MS')
-    future['cap'] = df_prophet['cap'].iloc[0]
-    future['floor'] = df_prophet['floor'].iloc[0]
-    future['company_growth'] = future['ds'].dt.year - 2017
-    future = add_promotion_factors(future)
-    prophet_forecast = model_prophet.predict(future)['yhat'].values[-forecast_steps:]
+        future = model_prophet.make_future_dataframe(periods=12, freq='MS')
+        future['cap'] = df_prophet['cap'].iloc[0]
+        future['floor'] = df_prophet['floor'].iloc[0]
+        future['company_growth'] = future['ds'].dt.year - 2017
+        future = add_promotion_factors(future)
 
-    hw_model = ExponentialSmoothing(df_long['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
-    hw_forecast = hw_model.forecast(forecast_steps).values
+        prophet_future = model_prophet.predict(future)['yhat'].values[-12:]
 
-    combined_forecast = w1 * sarima_forecast.values + w2 * prophet_forecast + w3 * hw_forecast
+        hw_model = ExponentialSmoothing(df_long['Demand'], trend='add', seasonal='add', seasonal_periods=12).fit()
+        hw_future = hw_model.forecast(12).values
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(df_long.index, df_long['Demand'], label='Historical', marker='o')
-    ax.plot(future_index, combined_forecast, label='Combined Forecast', marker='o', linestyle='--')
-    ax.set_title("Historical + Forecasted Demand")
-    ax.legend()
-    ax.grid()
-    st.pyplot(fig)
+        combined_forecast = w1 * sarima_future.values + w2 * prophet_future + w3 * hw_future
+
+    st.line_chart(pd.DataFrame({
+        "SARIMA Forecast": sarima_future,
+        "Prophet Forecast": prophet_future,
+        "Holt-Winters Forecast": hw_future,
+        "Combined Forecast": combined_forecast
+    }, index=future_index))
