@@ -13,7 +13,7 @@ st.markdown(
     "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
     unsafe_allow_html=True
 )
-st.title("📦 AI-Based Forecasting and Workforce Optimization")
+st.title("Demand Forecasting and Workforce Sizing 📈")
 
 uploaded_file = st.file_uploader("📄 Upload your demand data (Excel format)", type=["xlsx"])
 
