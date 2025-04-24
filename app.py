@@ -108,19 +108,6 @@ if uploaded_file:
         _, best_weights = run_cv(best_window)
         w1, w2, w3 = best_weights
 
-
-    return best_mae, best_weights
-
-        # --- Optimize initial window ---
-        best_mae_global = float('inf')
-        for win in range(30, 49, 3):
-            mae, _ = run_cv(win)
-            if mae < best_mae_global:
-                best_mae_global = mae
-                best_window = win
-        _, best_weights = run_cv(best_window)
-        w1, w2, w3 = best_weights
-
         # --- Forecast ---
         sarima = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
         sarima_fc = sarima.get_forecast(12).predicted_mean
