@@ -1,10 +1,9 @@
-
 streamlit
-prophet
-statsmodels
-pulp
-matplotlib
 pandas
 numpy
-openpyxl
+matplotlib
+statsmodels
+prophet
 scikit-learn
+pulp
+openpyxl
