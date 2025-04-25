@@ -166,9 +166,9 @@ if uploaded_file:
         st.pyplot(fig)
 
     st.subheader("📊 Individual Forecast Plots")
-    plot_forecast("📈 SARIMA", sarima_future)
-    plot_forecast("🔮 Prophet", prophet_future)
-    plot_forecast("📉 Holt-Winters", hw_future)
+    plot_forecast("SARIMA", sarima_future)
+    plot_forecast("Prophet", prophet_future)
+    plot_forecast("Holt-Winters", hw_future)
 
     st.subheader("🧪 Blended Forecast")
     fig, ax = plt.subplots(figsize=(14, 5))
