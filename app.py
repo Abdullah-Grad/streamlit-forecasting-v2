@@ -8,6 +8,8 @@ from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value
 
+plt.style.use('fivethirtyeight')
+
 st.set_page_config(layout='wide')
 st.markdown(
     "<div style='text-align: center;'><img src='https://raw.githubusercontent.com/Abdullah-Grad/streamlit-forecasting-v2/main/logo.png' width='200'></div>",
@@ -60,7 +62,8 @@ if uploaded_file:
             df_prophet_train['company_growth'] = df_prophet_train['ds'].dt.year - 2017
             df_prophet_train = add_promotion_factors(df_prophet_train)
 
-            model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+            model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                    weekly_seasonality=False, daily_seasonality=False)
             model_prophet.add_regressor('company_growth')
             model_prophet.add_regressor('Promotion')
             model_prophet.fit(df_prophet_train[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
@@ -105,7 +108,7 @@ if uploaded_file:
         _, best_weights = run_cv(best_initial_window)
         w1, w2, w3 = best_weights
 
-        sarima_model = SARIMAX(df_long['Demand'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit()
+        sarima_model = SARIMAX(df_long['Demand'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
         sarima_future = sarima_model.get_forecast(steps=12).predicted_mean
         future_index = pd.date_range(start=df_long.index[-1] + pd.DateOffset(months=1), periods=12, freq='MS')
         sarima_future.index = future_index
@@ -116,7 +119,8 @@ if uploaded_file:
         df_prophet['company_growth'] = df_prophet['ds'].dt.year - 2017
         df_prophet = add_promotion_factors(df_prophet)
 
-        model_prophet = Prophet(growth='logistic', yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+        model_prophet = Prophet(growth='logistic', yearly_seasonality=True,
+                                weekly_seasonality=False, daily_seasonality=False)
         model_prophet.add_regressor('company_growth')
         model_prophet.add_regressor('Promotion')
         model_prophet.fit(df_prophet[['ds', 'y', 'cap', 'floor', 'company_growth', 'Promotion']])
@@ -145,33 +149,48 @@ if uploaded_file:
         model.solve()
         total_cost = value(model.objective)
 
-    st.success(f"✅ Forecast Complete | SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | Total Labor Cost: {total_cost:,.2f} SAR")
+    st.success(f"✅ Forecast Complete | SARIMA={w1:.2f}, Prophet={w2:.2f}, HW={w3:.2f} | Total Labor Cost: 💰 {total_cost:,.2f} SAR")
 
     results = [(future_index[i].strftime('%B'), combined_forecast[i], sum(value(X[i, j]) for j in range(S))) for i in range(M)]
     st.dataframe(pd.DataFrame(results, columns=["Month", "Forecasted Demand", "Workers Required"]))
 
-    st.subheader("📊 Forecast Visualization")
+    def plot_forecast(title, y_values):
+        fig, ax = plt.subplots(figsize=(14, 5))
+        ax.plot(df_long.index, df_long['Demand'], label='Historical Demand', marker='o')
+        ax.plot(future_index, y_values, label=title, linestyle='--', marker='s')
+        ax.set_title(f"{title} Forecast")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Demand")
+        ax.legend()
+        ax.grid(True)
+        st.pyplot(fig)
+
+    st.subheader("📊 Individual Forecast Plots")
+    plot_forecast("📈 SARIMA", sarima_future)
+    plot_forecast("🔮 Prophet", prophet_future)
+    plot_forecast("📉 Holt-Winters", hw_future)
+
+    st.subheader("🧪 Blended Forecast")
     fig, ax = plt.subplots(figsize=(14, 5))
     ax.plot(df_long.index, df_long['Demand'], label='Historical Demand', marker='o')
-    ax.plot(sarima_future.index, sarima_future.values, label='SARIMA Forecast', linestyle='--')
-    ax.plot(future_index, prophet_future, label='Prophet Forecast', linestyle='--')
-    ax.plot(future_index, hw_future, label='Holt-Winters Forecast', linestyle='--')
-    ax.plot(future_index, combined_forecast, label='Blended Forecast', linestyle='-', linewidth=2)
+    ax.plot(future_index, combined_forecast, label='Blended Forecast', linestyle='--', marker='x')
+    ax.set_title("Combined Weighted Forecast")
     ax.set_xlabel("Date")
     ax.set_ylabel("Demand")
-    ax.set_title("Forecasted Demand by Model")
-    ax.grid(True)
     ax.legend()
+    ax.grid(True)
     st.pyplot(fig)
 
-    st.subheader("📊 Forecast Accuracy (In-Sample)")
+    st.subheader("📉 In-Sample Fit vs. Actual Demand")
     sarima_fitted = sarima_model.fittedvalues
     hw_fitted = hw_model_full.fittedvalues
+
     df_prophet_fit = df_long.reset_index().rename(columns={'Date': 'ds', 'Demand': 'y'})
     df_prophet_fit['cap'] = df_prophet_fit['y'].max() * 3
     df_prophet_fit['floor'] = df_prophet_fit['y'].min() * 0.5
     df_prophet_fit['company_growth'] = df_prophet_fit['ds'].dt.year - 2017
     df_prophet_fit = add_promotion_factors(df_prophet_fit)
+
     model_prophet_fit = Prophet(growth='logistic', yearly_seasonality=True)
     model_prophet_fit.add_regressor('company_growth')
     model_prophet_fit.add_regressor('Promotion')
@@ -182,16 +201,19 @@ if uploaded_file:
     combined_fitted = w1 * sarima_fitted.values + w2 * prophet_fitted + w3 * hw_fitted.values
     combined_fitted_series = pd.Series(combined_fitted, index=df_long.index[:len(combined_fitted)])
 
-    mae = mean_absolute_error(df_long['Demand'], combined_fitted_series)
-    mape = mean_absolute_percentage_error(df_long['Demand'], combined_fitted_series) * 100
-    st.write(f"**MAE**: {mae:.2f} | **MAPE**: {mape:.2f}%")
-
     fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(df_long.index, df_long['Demand'], label='Historical Demand', marker='o')
-    ax.plot(combined_fitted_series.index, combined_fitted_series, label='Blended In-Sample Fit', linestyle='--', marker='x')
-    ax.set_title("In-Sample Fit vs. Actual Demand")
+    ax.plot(df_long.index, df_long['Demand'], label='Actual Demand', marker='o')
+    ax.plot(combined_fitted_series.index, combined_fitted_series, label='Fitted Forecast', linestyle='--', marker='x')
     ax.set_xlabel("Date")
     ax.set_ylabel("Demand")
-    ax.legend()
+    ax.set_title("In-Sample Fit")
     ax.grid(True)
+    ax.legend()
     st.pyplot(fig)
+
+    st.subheader("🧮 Error Metrics")
+    mae = mean_absolute_error(df_long['Demand'], combined_fitted_series)
+    mape = mean_absolute_percentage_error(df_long['Demand'], combined_fitted_series) * 100
+    st.write(f"**Cross-Validation MAE**: {best_mae_global:.2f}")
+    st.write(f"**In-Sample MAE**: {mae:.2f}")
+    st.write(f"**In-Sample MAPE**: {mape:.2f}%")
