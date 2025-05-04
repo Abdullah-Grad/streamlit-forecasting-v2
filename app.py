@@ -20,7 +20,7 @@ st.title("Demand Forecasting and Workforce Sizing 📈")
 uploaded_file = st.file_uploader("📄 Upload your demand data (Excel format)", type=["xlsx"])
 
 if uploaded_file:
-    with st.spinner("🔄 Loading and preparing data..."):
+    with st.spinner("🔄 Loading and preparing data"):
         df = pd.read_excel(uploaded_file)
         month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
